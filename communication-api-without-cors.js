@@ -4,25 +4,11 @@ const util = require('util');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const dotenv = require('dotenv');
-const cors = require('cors');
 const { body, validationResult } = require('express-validator');
 
 dotenv.config();
 const app = express();
 app.use(express.json());
-
-// CORS Middleware
-const allowedOrigins = ['http://44.201.188.7', 'http://122.15.1.49']; // Replace with your actual IPs
-app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true
-}));
 
 // MySQL Database Connection
 const db = mysql.createConnection({
@@ -67,6 +53,7 @@ app.post('/api/communication',
         body('message').isString().withMessage('Message must be a string')
     ],
     async (req, res) => {
+        // Check validation
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
@@ -78,18 +65,21 @@ app.post('/api/communication',
         let file_id = null;
 
         try {
+            // Insert into space_time if location and date_time are provided
             if (longitude && latitude && date_time) {
                 const spaceTimeSql = `INSERT INTO space_time (longitude, latitude, date_time) VALUES (?, ?, ?)`;
                 const spaceTimeResult = await queryAsync(spaceTimeSql, [longitude, latitude, date_time]);
                 space_time_id = spaceTimeResult.insertId;
             }
 
+            // Insert into file if file_path is provided
             if (file_path) {
                 const fileSql = `INSERT INTO file (file_path) VALUES (?)`;
                 const fileResult = await queryAsync(fileSql, [file_path]);
                 file_id = fileResult.insertId;
             }
 
+            // Insert into communication
             const communicationSql = `
                 INSERT INTO communication (sender, receiver, channel, noise, code, message, feedback, sense, space_time_id, file_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -105,7 +95,7 @@ app.post('/api/communication',
     }
 );
 
-// Get All Communications
+// Get All Communications (Including date_time and file_path)
 app.get('/api/communication', authenticateToken, async (req, res) => {
     const sql = `
         SELECT 
@@ -125,7 +115,7 @@ app.get('/api/communication', authenticateToken, async (req, res) => {
     }
 });
 
-// Get Communication by ID
+// Get Communication by ID (Including date_time and file_path)
 app.get('/api/communication/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const sql = `
@@ -148,12 +138,13 @@ app.get('/api/communication/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Update Communication
+// Update Communication by ID
 app.put('/api/communication/:id', authenticateToken, [
     body('sender').optional().isString().withMessage('Sender must be a string'),
     body('receiver').optional().isString().withMessage('Receiver must be a string'),
     body('message').optional().isString().withMessage('Message must be a string')
 ], async (req, res) => {
+    // Check validation
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
@@ -172,7 +163,7 @@ app.put('/api/communication/:id', authenticateToken, [
     }
 });
 
-// Delete Communication
+// Delete Communication by ID
 app.delete('/api/communication/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const sql = `DELETE FROM communication WHERE id = ?`;
@@ -185,10 +176,11 @@ app.delete('/api/communication/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Login Endpoint
+// Authentication Routes
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
-
+    // Check if the password is hashed in the .env file
+    // Check for Admin credentials
     if (username === process.env.ADMIN_USER) {
         const hashedPassword = process.env.ADMIN_PASS;
         if (!bcrypt.compareSync(password, hashedPassword)) {
@@ -198,6 +190,7 @@ app.post('/api/login', async (req, res) => {
         return res.json({ token });
     }
 
+    // Check for Developer credentials
     if (username === process.env.DEVELOPER_USER) {
         const hashedDeveloperPassword = process.env.DEVELOPER_PASS;
         if (!bcrypt.compareSync(password, hashedDeveloperPassword)) {
