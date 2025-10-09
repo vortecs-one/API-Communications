@@ -7,15 +7,16 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const { body, validationResult } = require('express-validator');
+const fs = require('fs');
+
 
 dotenv.config();
 const app = express();
 app.use(express.json());
 
-// CORS MIDDLEWARE
-const allowedOrigins = ['http://192.168.1.100', 'http://123.45.67.89']; 
+// CORS Middleware
+const allowedOrigins = ['http://192.168.1.100', 'http://123.45.67.89']; // Update with your actual origins
 app.use(cors({
     origin: function (origin, callback) {
         if (!origin || allowedOrigins.includes(origin)) {
@@ -30,7 +31,7 @@ app.use(cors({
 // Serve uploaded files
 app.use('/files', express.static(path.join(__dirname, 'uploads/files')));
 
-// MySQL DB CONNECTION
+// MySQL Connection
 const db = mysql.createConnection({
     host: 'localhost',
     user: process.env.DB_USER,
@@ -40,19 +41,17 @@ const db = mysql.createConnection({
     connectionLimit: 10,
     queueLimit: 0
 });
-db.connect((err) => {
-    if (err) {
-        console.error('Database connection failed:', err);
-        return;
-    }
+db.connect(err => {
+    if (err) return console.error('Database connection failed:', err);
     console.log('Connected to MySQL database.');
 });
 const queryAsync = util.promisify(db.query).bind(db);
 
-// JWT MIDDLEWARE
+// JWT Middleware
 const authenticateToken = (req, res, next) => {
     const token = req.header('Authorization');
     if (!token) return res.status(401).json({ error: 'Access denied' });
+
     jwt.verify(token.split(' ')[1], process.env.JWT_SECRET, (err, user) => {
         if (err) return res.status(403).json({ error: 'Invalid token' });
         req.user = user;
@@ -60,34 +59,30 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// -------- FILE UPLOAD SETUP (Images + Videos) --------
+// Multer File Upload Setup
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/files/');
-    },
+    destination: (req, file, cb) => cb(null, 'uploads/files'),
     filename: (req, file, cb) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+        const ext = path.extname(file.originalname);
+        cb(null, file.fieldname + '-' + uniqueSuffix + ext);
     }
 });
 const upload = multer({
     storage,
-    limits: { fileSize: 1024 * 1024 * 200 }, // 200MB
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
     fileFilter: (req, file, cb) => {
-        const allowed = [
-            'image/jpeg', 'image/png', 'application/pdf',
-            'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska'
-        ];
-        if (allowed.includes(file.mimetype)) 
-            cb(null, true);
-        else 
-            cb(new Error('Invalid file type'));
+        const allowedTypes = /jpeg|jpg|png|pdf|docx|mp4|avi|txt|zip/;
+        const ext = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        const mime = allowedTypes.test(file.mimetype);
+        if (ext && mime) cb(null, true);
+        else cb(new Error('Invalid file type'));
     }
 });
 
-// ---------------------------------------- API ENDPOINTS ----------------------------------------
+// ----------- API Endpoints -----------
 
-// CREATE COMMUNICATION WITH FILE UPLOAD
+// Create Communication
 app.post('/api/communication',
     authenticateToken,
     upload.single('file'),
@@ -102,8 +97,12 @@ app.post('/api/communication',
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { sender, receiver, channel, noise, code, message, feedback, sense, longitude, latitude, date_time } = req.body;
-        
+        const {
+            sender, receiver, channel, noise,
+            code, message, feedback, sense,
+            longitude, latitude, date_time
+        } = req.body;
+
         let space_time_id = null;
         let file_id = null;
 
@@ -124,22 +123,23 @@ app.post('/api/communication',
                 INSERT INTO communication (sender, receiver, channel, noise, code, message, feedback, sense, space_time_id, file_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
-            const communicationResult = await queryAsync(communicationSql, 
-                [sender, receiver, channel, noise, code, message, feedback, sense, space_time_id, file_id]
-            );
+            const commResult = await queryAsync(communicationSql, [
+                sender, receiver, channel, noise, code, message, feedback, sense, space_time_id, file_id
+            ]);
 
             res.json({
-                id: communicationResult.insertId,
+                id: commResult.insertId,
                 message: 'Communication record created successfully',
                 file: req.file ? `/files/${req.file.filename}` : null
             });
         } catch (err) {
-            res.status(500).send({ error: 'Error inserting data', details: err.message });
+            console.error('Insert error:', err);
+            res.status(500).json({ error: 'Error inserting data', details: err.message });
         }
     }
 );
 
-// GET ALL COMMUNICATIONS
+// Get All Communications
 app.get('/api/communication', authenticateToken, async (req, res) => {
     const sql = `
         SELECT 
@@ -155,11 +155,11 @@ app.get('/api/communication', authenticateToken, async (req, res) => {
         const results = await queryAsync(sql);
         res.json(results);
     } catch (err) {
-        res.status(500).send({ error: 'Error retrieving communication records', details: err.message });
+        res.status(500).json({ error: 'Error retrieving communication records', details: err.message });
     }
 });
 
-// GET COMMUNICATION BY ID
+// Get Communication by ID
 app.get('/api/communication/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const sql = `
@@ -175,57 +175,86 @@ app.get('/api/communication/:id', authenticateToken, async (req, res) => {
 
     try {
         const results = await queryAsync(sql, [id]);
-        if (results.length === 0) return res.status(404).send({ message: 'Communication record not found' });
+        if (results.length === 0) return res.status(404).json({ message: 'Communication record not found' });
         res.json(results[0]);
     } catch (err) {
-        res.status(500).send({ error: 'Error retrieving communication record', details: err.message });
+        res.status(500).json({ error: 'Error retrieving communication record', details: err.message });
     }
 });
 
-// UPDATE COMMUNICATION
-app.put('/api/communication/:id', authenticateToken, [
-    body('sender').optional().isString().withMessage('Sender must be a string'),
-    body('receiver').optional().isString().withMessage('Receiver must be a string'),
-    body('message').optional().isString().withMessage('Message must be a string')
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-
+// Get Communication FILE by ID
+app.get('/api/files/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { sender, receiver, channel, noise, code, message, feedback, sense } = req.body;
-    const sql = `UPDATE communication SET sender = ?, receiver = ?, channel = ?, noise = ?, code = ?, message = ?, feedback = ?, sense = ? WHERE id = ?`;
-    
+
     try {
-        const result = await queryAsync(sql, [sender, receiver, channel, noise, code, message, feedback, sense, id]);
-        if (result.affectedRows === 0) return res.status(404).send({ message: 'Communication record not found' });
-        res.json({ message: 'Communication record updated successfully' });
+        const fileQuery = `SELECT file_path FROM file WHERE id = ?`;
+        const results = await queryAsync(fileQuery, [id]);
+
+        if (results.length === 0) {
+            return res.status(404).json({ error: 'File not found in database' });
+        }
+
+        const fullPath = path.join(__dirname, results[0].file_path);
+        if (!fs.existsSync(fullPath)) {
+            return res.status(404).json({ error: 'File not found on disk' });
+        }
+
+        res.download(fullPath);
     } catch (err) {
-        res.status(500).send({ error: 'Error updating communication record', details: err.message });
+        console.error('File download error:', err);
+        res.status(500).json({ error: 'Error downloading file', details: err.message });
     }
 });
 
-// DELETE COMMUNICATION
+// Update Communication
+app.put('/api/communication/:id',
+    authenticateToken,
+    [
+        body('sender').optional().isString(),
+        body('receiver').optional().isString(),
+        body('message').optional().isString()
+    ],
+    async (req, res) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { id } = req.params;
+        const { sender, receiver, channel, noise, code, message, feedback, sense } = req.body;
+
+        const sql = `UPDATE communication SET sender = ?, receiver = ?, channel = ?, noise = ?, code = ?, message = ?, feedback = ?, sense = ? WHERE id = ?`;
+
+        try {
+            const result = await queryAsync(sql, [sender, receiver, channel, noise, code, message, feedback, sense, id]);
+            if (result.affectedRows === 0) return res.status(404).json({ message: 'Communication record not found' });
+            res.json({ message: 'Communication record updated successfully' });
+        } catch (err) {
+            res.status(500).json({ error: 'Error updating communication record', details: err.message });
+        }
+    }
+);
+
+// Delete Communication
 app.delete('/api/communication/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const sql = `DELETE FROM communication WHERE id = ?`;
+
     try {
         const result = await queryAsync(sql, [id]);
-        if (result.affectedRows === 0) return res.status(404).send({ message: 'Communication record not found' });
+        if (result.affectedRows === 0) return res.status(404).json({ message: 'Communication record not found' });
         res.json({ message: 'Communication record deleted successfully' });
     } catch (err) {
-        res.status(500).send({ error: 'Error deleting communication record', details: err.message });
+        res.status(500).json({ error: 'Error deleting communication record', details: err.message });
     }
 });
 
-// LOGIN
+// Login Endpoint
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
 
     if (username === process.env.ADMIN_USER) {
-        const hashedPassword = process.env.ADMIN_PASS;
-        if (!bcrypt.compareSync(password, hashedPassword)) {
+        if (!bcrypt.compareSync(password, process.env.ADMIN_PASS)) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: '1h' });
@@ -233,8 +262,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     if (username === process.env.DEVELOPER_USER) {
-        const hashedDeveloperPassword = process.env.DEVELOPER_PASS;
-        if (!bcrypt.compareSync(password, hashedDeveloperPassword)) {
+        if (!bcrypt.compareSync(password, process.env.DEVELOPER_PASS)) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: '1h' });
@@ -244,6 +272,7 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid credentials' });
 });
 
+// Start Server
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
