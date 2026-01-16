@@ -87,8 +87,14 @@ const upload = multer({
 
 // ---------------------------------------- API ENDPOINTS ----------------------------------------
 
+// HEALTH ENDPOINT
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+
 // CREATE COMMUNICATION WITH FILE UPLOAD
-app.post('/api/communication',
+app.post('/create',
     authenticateToken,
     upload.single('file'),
     [
@@ -140,7 +146,7 @@ app.post('/api/communication',
 );
 
 // GET ALL COMMUNICATIONS
-app.get('/api/communication', authenticateToken, async (req, res) => {
+app.get('/get/all', authenticateToken, async (req, res) => {
     const sql = `
         SELECT 
             c.id, c.sender, c.receiver, c.channel, c.noise, c.code, 
@@ -160,7 +166,7 @@ app.get('/api/communication', authenticateToken, async (req, res) => {
 });
 
 // GET COMMUNICATION BY ID
-app.get('/api/communication/:id', authenticateToken, async (req, res) => {
+app.get('/get/id/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const sql = `
         SELECT 
@@ -183,7 +189,7 @@ app.get('/api/communication/:id', authenticateToken, async (req, res) => {
 });
 
 // UPDATE COMMUNICATION
-app.put('/api/communication/:id', authenticateToken, [
+app.put('/update/:id', authenticateToken, [
     body('sender').optional().isString().withMessage('Sender must be a string'),
     body('receiver').optional().isString().withMessage('Receiver must be a string'),
     body('message').optional().isString().withMessage('Message must be a string')
@@ -207,7 +213,7 @@ app.put('/api/communication/:id', authenticateToken, [
 });
 
 // DELETE COMMUNICATION
-app.delete('/api/communication/:id', authenticateToken, async (req, res) => {
+app.delete('/delete/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const sql = `DELETE FROM communication WHERE id = ?`;
     try {
@@ -220,7 +226,7 @@ app.delete('/api/communication/:id', authenticateToken, async (req, res) => {
 });
 
 // LOGIN
-app.post('/api/login', async (req, res) => {
+app.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
     if (username === process.env.ADMIN_USER) {
